@@ -135,7 +135,12 @@ class AVEquityHistoricalFetcher(
 
         if query.adjustment != "unadjusted":
             function += "_ADJUSTED"
-        query_str += f"&function={function}&outputsize=full&datatype=csv"
+        # "compact" (latest 100 bars) is available on free keys, "full" is premium:
+        # ask for full history only when the requested range needs it.
+        start = query.start_date
+        recent = start is not None and (datetime.now().date() - start).days <= 140
+        outputsize = "compact" if recent and "INTRADAY" not in function else "full"  # weekly/monthly are resampled from daily
+        query_str += f"&function={function}&outputsize={outputsize}&datatype=csv"
 
         if "INTRADAY" in function:
             query_str += f"&interval={interval}&extended_hours={str(query.extended_hours).lower()}"
@@ -201,6 +206,16 @@ class AVEquityHistoricalFetcher(
                 f"&symbol={symbol}&apikey={api_key}"
             )
             result = await amake_request(url, response_callback=callback)
+            unadjusted = query.adjustment == "unadjusted"
+            # Adjusted daily series are premium on Alpha Vantage: fall back to raw prices on free keys.
+            if isinstance(result, bytes) and result.lstrip()[:1] == b"{" and b"premium" in result.lower() and "_ADJUSTED" in url:
+                warn(
+                    "Adjusted daily prices need a premium Alpha Vantage plan; returning unadjusted prices "
+                    "(not split- or dividend-adjusted). Use adjustment='unadjusted' to skip this retry."
+                )
+                await asyncio.sleep(1.2)  # free keys allow one request per second
+                result = await amake_request(url.replace("_ADJUSTED", ""), response_callback=callback)
+                unadjusted = True
             if not result:
                 warn(f"Symbol Error: No data found for {symbol}")
             if result:
@@ -222,7 +237,7 @@ class AVEquityHistoricalFetcher(
                         data.set_index("date", inplace=True)
                         # The returned data when 'adjusted=true' from the API does not return a usable OHLCV data set.
                         # We need to calculate the adjusted prices manually.
-                        if query.adjustment != "unadjusted":
+                        if not unadjusted:
                             temp = data.copy()
                             temp["dividend_factor"] = (
                                 temp["close"] - temp["dividend"]
@@ -258,7 +273,7 @@ class AVEquityHistoricalFetcher(
                             "dividend": "sum",
                             "split_factor": "prod",
                         }
-                        if query.adjustment == "unadjusted":
+                        if unadjusted:
                             agg_dict.pop("dividend")
                             agg_dict.pop("split_factor")
                         if query.interval == "1M":

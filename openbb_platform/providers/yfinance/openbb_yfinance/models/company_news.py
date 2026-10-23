@@ -12,6 +12,52 @@ from openbb_core.provider.standard_models.company_news import (
 from pydantic import Field, field_validator
 
 
+_RSS_URL = "https://feeds.finance.yahoo.com/rss/2.0/headline"
+
+
+def _yahoo_rss(sym: str) -> str:
+    """Yahoo's per-ticker RSS headline feed (used when yfinance's news endpoint returns nothing)."""
+    # pylint: disable=import-outside-toplevel
+    import requests
+
+    res = requests.get(
+        _RSS_URL,
+        params={"s": sym, "region": "US", "lang": "en-US"},
+        headers={"User-Agent": "Mozilla/5.0"},
+        timeout=20,
+    )
+    res.raise_for_status()
+    return res.text
+
+
+def _parse_rss(xml: str, sym: str) -> list[dict]:
+    """Normalize RSS items to CompanyNewsData fields."""
+    # pylint: disable=import-outside-toplevel
+    from email.utils import parsedate_to_datetime
+    from xml.etree import ElementTree
+
+    out: list[dict] = []
+    for item in ElementTree.fromstring(xml).iter("item"):
+        title, url, pub = (item.findtext(k) for k in ("title", "link", "pubDate"))
+        if not (title and url and pub):
+            continue
+        row: dict[str, Any] = {
+            "symbol": sym,
+            "title": title.strip(),
+            "url": url.strip(),
+            "date": parsedate_to_datetime(pub),
+            "source": "Yahoo Finance",
+        }
+        summary = (item.findtext("description") or "").strip()
+        if summary:
+            row["summary"] = summary
+            row["text"] = summary
+        if item.findtext("guid"):
+            row["id"] = item.findtext("guid")
+        out.append(row)
+    return out
+
+
 class YFinanceCompanyNewsQueryParams(CompanyNewsQueryParams):
     """YFinance Company News Query.
 
@@ -128,6 +174,9 @@ class YFinanceCompanyNewsFetcher(
                 norm = _normalize_news_item(item, sym)
                 if norm:
                     out.append(norm)
+            if not out:
+                # Yahoo retired the endpoint behind Ticker.get_news() (it returns 404 and yfinance returns []).
+                out = _parse_rss(_yahoo_rss(sym), sym)
             return out
 
         async def get_one(sym: str) -> None:
