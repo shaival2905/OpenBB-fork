@@ -565,6 +565,7 @@ class FinvizEquityScreenerFetcher(
             d_check_screener,
             d_signals,
         )
+        from openbb_finviz.utils.screener_page import fetch_screener
         from pandas import DataFrame
 
         preset = None
@@ -634,12 +635,14 @@ class FinvizEquityScreenerFetcher(
             if asc is not None:
                 ascend = asc == "true"
 
-            df_screen = screen.screener_view(
-                order=d_general.get("Order", "Change"),
-                limit=limit if limit else 100000,
-                ascend=ascend,
-                sleep_sec=sleep,
-                verbose=0,
+            df_screen = DataFrame(
+                fetch_screener(
+                    screen,
+                    order=d_general.get("Order", "Change"),
+                    ascend=ascend,
+                    limit=limit if limit else 100000,
+                    sleep_sec=sleep,
+                )
             )
         # If no preset is supplied, then set the filters based on the query parameters.
         else:
@@ -707,15 +710,17 @@ class FinvizEquityScreenerFetcher(
                     + " Returning 10K symbols can take several minutes."
                 )
 
-            df_screen = screen.screener_view(
-                order=sort_by,
-                limit=limit if limit else 100000,
-                ascend=ascend,
-                sleep_sec=sleep,
-                verbose=0,
+            df_screen = DataFrame(
+                fetch_screener(
+                    screen,
+                    order=sort_by,
+                    ascend=ascend,
+                    limit=limit if limit else 100000,
+                    sleep_sec=sleep,
+                )
             )
 
-        if df_screen is None or df_screen.empty:
+        if df_screen.empty:
             raise EmptyDataError(
                 "No tickers found for the supplied parameters. Try relaxing the constraints."
             )
