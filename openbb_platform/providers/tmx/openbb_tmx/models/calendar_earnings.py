@@ -29,6 +29,7 @@ class TmxCalendarEarningsData(CalendarEarningsData):
         "name": "companyName",
     }
 
+    symbol: str = Field(description="The ticker symbol, with the .TO Toronto Stock Exchange suffix.")
     name: str = Field(description="The company's name.")
     eps_consensus: float | None = Field(
         default=None, description="The consensus estimated EPS in dollars."
@@ -48,6 +49,13 @@ class TmxCalendarEarningsData(CalendarEarningsData):
         default=None,
         description="The time of the report - i.e., before or after market.",
     )
+
+    @field_validator("symbol", mode="before")
+    @classmethod
+    def tag_toronto_suffix(cls, v):  # pylint: disable=E0213
+        """Tag a TMX ticker with the .TO exchange suffix, as TMX returns it bare."""
+        symbol = str(v).strip().upper()
+        return symbol if symbol.endswith(".TO") else f"{symbol}.TO"
 
     @field_validator("surprise_percent", mode="before", check_fields=False)
     @classmethod
